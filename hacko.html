@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EcoScan AI | Verify Sustainability</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://unpkg.com/tesseract.js@5.0.3/dist/tesseract.min.js"></script>
+    <style>
+        [x-cloak] { display: none !important; }
+        .scan-line {
+            height: 2px;
+            background: linear-gradient(to right, transparent, #10b981, transparent);
+            box-shadow: 0 0 15px #10b981;
+            animation: scan 2s ease-in-out infinite;
+        }
+        @keyframes scan {
+            0%, 100% { top: 0%; }
+            50% { top: 100%; }
+        }
+    </style>
+</head>
+<body class="bg-slate-950 min-h-screen font-sans antialiased text-slate-200">
+
+    <div x-data="ecoApp()" x-init="initCamera()" class="max-w-md mx-auto min-h-screen flex flex-col p-4">
+        
+        <header class="flex justify-between items-center py-6">
+            <div>
+                <h1 class="text-2xl font-black italic tracking-tighter text-emerald-400">ECOSCAN.AI</h1>
+                <p class="text-xs text-slate-500 font-medium uppercase tracking-widest">Sustainability Intelligence</p>
+            </div>
+            <div class="h-10 w-10 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center">
+                <div :class="cameraActive ? 'bg-emerald-500' : 'bg-red-500'" class="h-2 w-2 rounded-full animate-pulse"></div>
+            </div>
+        </header>
+
+        <main class="relative flex-grow flex flex-col gap-6">
+            <div class="relative aspect-[3/4] rounded-3xl overflow-hidden border-2 border-slate-800 bg-black shadow-2xl">
+                <video id="video" autoplay playsinline class="w-full h-full object-cover grayscale-[20%]"></video>
+                <canvas id="canvas" class="hidden"></canvas>
+
+                <div x-show="loading" class="absolute inset-0 z-10 pointer-events-none">
+                    <div class="relative w-full h-full">
+                        <div class="scan-line absolute w-full z-20"></div>
+                        <div class="absolute inset-0 bg-emerald-500/10"></div>
+                    </div>
+                </div>
+
+                <div x-show="!loading && !result" class="absolute bottom-6 left-0 right-0 px-6">
+                    <div class="bg-black/40 backdrop-blur-md border border-white/10 p-4 rounded-2xl text-center">
+                        <p class="text-sm font-medium text-white">Center the ingredient list or recycling logo</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex flex-col gap-4">
+                <button 
+                    @click="performAnalysis()"
+                    :disabled="loading"
+                    class="w-full bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-800 disabled:text-slate-500 py-5 rounded-2xl font-bold text-slate-950 transition-all active:scale-[0.98] flex items-center justify-center gap-3 text-lg shadow-[0_0_30px_-10px_rgba(16,185,129,0.5)]"
+                >
+                    <template x-if="!loading">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                    </template>
+                    <span x-text="loading ? 'Processing Labels...' : 'Analyze Product'"></span>
+                </button>
+
+                <div x-show="result" x-cloak x-transition:enter="transition ease-out duration-300" x-transition:enter-start="opacity-0 translate-y-4" class="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl">
+                    <div class="flex items-start justify-between mb-4">
+                        <div>
+                            <h3 class="text-xs font-black uppercase tracking-widest text-slate-500 mb-1">Analysis Result</h3>
+                            <p class="text-xl font-bold" :class="statusColor" x-text="statusText"></p>
+                        </div>
+                        <button @click="result = null" class="text-slate-500 hover:text-white">&times;</button>
+                    </div>
+
+                    <p class="text-slate-400 text-sm leading-relaxed mb-4" x-text="analysisMessage"></p>
+
+                    <div class="flex flex-wrap gap-2">
+                        <template x-for="tag in allTags" :key="tag">
+                            <span class="px-3 py-1 bg-slate-800 border border-slate-700 rounded-full text-[10px] font-bold text-slate-300" x-text="'#' + tag"></span>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <footer class="py-6 text-center">
+            <p class="text-[10px] text-slate-600 font-medium uppercase tracking-[0.2em]">Open Source Privacy-First AI</p>
+        </footer>
+    </div>
+
+    <script>
+        function ecoApp() {
+            return {
+                loading: false,
+                result: null,
+                cameraActive: false,
+                allTags: [],
+                statusText: '',
+                statusColor: '',
+                analysisMessage: '',
+                
+                // Constants
+                SUSTAINABLE_KEYWORDS: ['organic', 'recycled', 'biodegradable', 'compostable', 'fair trade', 'fsc', 'vegan', 'non-toxic'],
+                GREENWASHING_TERMS: ['natural', 'green', 'eco', 'pure', 'earth-friendly', 'sustainable-ish'],
+
+                async initCamera() {
+                    try {
+                        const stream = await navigator.mediaDevices.getUserMedia({ 
+                            video: { facingMode: "environment" }, 
+                            audio: false 
+                        });
+                        document.getElementById('video').srcObject = stream;
+                        this.cameraActive = true;
+                    } catch (err) {
+                        alert("Camera access denied. Please use HTTPS.");
+                    }
+                },
+
+                async performAnalysis() {
+                    this.loading = true;
+                    this.result = null;
+                    
+                    const video = document.getElementById('video');
+                    const canvas = document.getElementById('canvas');
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    canvas.getContext('2d').drawImage(video, 0, 0);
+
+                    try {
+                        const { data: { text } } = await Tesseract.recognize(canvas, 'eng');
+                        const lowerText = text.toLowerCase();
+                        
+                        const sustainable = this.SUSTAINABLE_KEYWORDS.filter(word => lowerText.includes(word));
+                        const greenwashed = this.GREENWASHING_TERMS.filter(word => lowerText.includes(word));
+                        
+                        this.processLogic(sustainable, greenwashed);
+                    } catch (e) {
+                        console.error(e);
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                processLogic(sus, gw) {
+                    this.result = true;
+                    this.allTags = [...sus, ...gw];
+                    
+                    if (sus.length > 0) {
+                        this.statusText = "VERIFIED IMPACT";
+                        this.statusColor = "text-emerald-400";
+                        this.analysisMessage = "Found certified sustainability markers. This product meets legitimate environmental standards.";
+                    } else if (gw.length > 0) {
+                        this.statusText = "GREENWASHING RISK";
+                        this.statusColor = "text-rose-500";
+                        this.analysisMessage = "Warning: Product uses high-level marketing terms without specific certification data.";
+                    } else {
+                        this.statusText = "NEUTRAL / NO DATA";
+                        this.statusColor = "text-slate-400";
+                        this.analysisMessage = "Could not identify clear sustainability markers in the detected text.";
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>
